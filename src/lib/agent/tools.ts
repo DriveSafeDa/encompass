@@ -24,36 +24,63 @@ export async function toolQueryKnowledge(
   ctx: ToolContext,
 ): Promise<string> {
   try {
-    const mode = (input.mode as "hybrid" | "local" | "global") || "hybrid";
-    const result = await queryKnowledge(ctx.orgId, input.query, mode);
-
-    // Enrich with document metadata from DB
-    const enrichedSources = [];
-    for (const source of result.sources || []) {
-      // Parse tenant-prefixed ID: orgId:docId:section-N
-      const parts = source.id.split(":");
-      if (parts.length >= 3) {
-        const docId = parts[1];
-        const doc = await prisma.document.findUnique({
-          where: { id: docId },
-          select: { title: true, category: true, filename: true },
+    // Try LightRAG first, fall back to DB search
+    let sections;
+    try {
+      const result = await queryKnowledge(ctx.orgId, input.query, (input.mode as any) || "hybrid");
+      if (result.response && result.sources && result.sources.length > 0) {
+        return JSON.stringify({
+          success: true,
+          response: result.response,
+          sources: result.sources.slice(0, 10),
+          source_count: result.sources.length,
         });
-        enrichedSources.push({
-          ...source,
-          document_title: doc?.title || "Unknown",
-          document_category: doc?.category || "Unknown",
-          filename: doc?.filename || "",
-        });
-      } else {
-        enrichedSources.push(source);
       }
+    } catch {
+      // LightRAG not available — fall back to DB full-text search
     }
+
+    // DB fallback: search document sections by content match
+    const keywords = input.query.toLowerCase().split(/\s+/).filter((w) => w.length > 2).slice(0, 5);
+
+    sections = await prisma.documentSection.findMany({
+      where: {
+        document: { orgId: ctx.orgId, status: "indexed" },
+        OR: keywords.map((kw) => ({
+          content: { contains: kw, mode: "insensitive" as const },
+        })),
+      },
+      include: {
+        document: { select: { id: true, title: true, category: true, filename: true } },
+      },
+      take: 10,
+      orderBy: { sectionIndex: "asc" },
+    });
+
+    if (sections.length === 0) {
+      return JSON.stringify({
+        success: true,
+        response: "No relevant information found in the knowledge base for this query.",
+        sources: [],
+        source_count: 0,
+      });
+    }
+
+    const sources = sections.map((s) => ({
+      id: s.id,
+      content: s.content.slice(0, 500),
+      heading: s.heading,
+      page_number: s.pageNumber,
+      document_title: s.document.title,
+      document_category: s.document.category,
+      document_id: s.document.id,
+    }));
 
     return JSON.stringify({
       success: true,
-      response: result.response,
-      sources: enrichedSources.slice(0, 10),
-      source_count: enrichedSources.length,
+      response: `Found ${sources.length} relevant sections across ${new Set(sources.map((s) => s.document_title)).size} documents.`,
+      sources,
+      source_count: sources.length,
     });
   } catch (e: any) {
     return JSON.stringify({ success: false, error: e.message });
