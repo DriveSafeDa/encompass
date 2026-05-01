@@ -104,17 +104,30 @@ async function main() {
     // Extract text based on type
     let text = content;
     if (file.filename.endsWith(".html")) {
-      // Simple HTML text extraction
-      text = content
-        .replace(/<script[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/\s+/g, " ")
+      // Smart HTML extraction — preserves table structure
+      const cheerio = await import("cheerio");
+      const $ = cheerio.load(content);
+      $("script, style, nav, footer, header, .sidebar, .nav, .menu").remove();
+      // Convert tables to pipe-delimited rows
+      $("table").each((_: number, table: any) => {
+        const rows: string[] = [];
+        $(table).find("tr").each((_: number, tr: any) => {
+          const cells: string[] = [];
+          $(tr).find("th, td").each((_: number, cell: any) => {
+            cells.push($(cell).text().trim());
+          });
+          if (cells.some((c: string) => c.length > 0)) {
+            rows.push(cells.join(" | "));
+          }
+        });
+        if (rows.length > 0) {
+          $(table).replaceWith("\n\n" + rows.join("\n") + "\n\n");
+        }
+      });
+      $("li").each((_: number, li: any) => { $(li).prepend("- "); });
+      text = $("body").text()
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
         .trim();
     } else if (file.filename.endsWith(".json")) {
       // Pretty-print JSON for readability

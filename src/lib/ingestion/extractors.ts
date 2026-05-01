@@ -78,12 +78,34 @@ async function extractHtml(buffer: Buffer): Promise<ExtractionResult> {
   const cheerio = await import("cheerio");
   const $ = cheerio.load(buffer.toString("utf-8"));
 
-  // Remove script and style tags
-  $("script, style, nav, footer, header").remove();
+  // Remove non-content elements
+  $("script, style, nav, footer, header, .sidebar, .nav, .menu").remove();
+
+  // Convert tables to readable text format (preserve structure)
+  $("table").each((_, table) => {
+    const rows: string[] = [];
+    $(table).find("tr").each((_, tr) => {
+      const cells: string[] = [];
+      $(tr).find("th, td").each((_, cell) => {
+        cells.push($(cell).text().trim());
+      });
+      if (cells.some((c) => c.length > 0)) {
+        rows.push(cells.join(" | "));
+      }
+    });
+    if (rows.length > 0) {
+      $(table).replaceWith("\n\n" + rows.join("\n") + "\n\n");
+    }
+  });
+
+  // Convert list items
+  $("li").each((_, li) => {
+    $(li).prepend("- ");
+  });
 
   // Extract text content
   const text = $("body").text()
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
