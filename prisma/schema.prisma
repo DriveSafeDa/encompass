@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ═══ MULTI-TENANCY ═══
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  domain        String?
+  logoUrl       String?
+  personaFile   String?  @db.Text
+  voiceConfig   Json?
+  plan          String   @default("starter")
+  tokenBudget   Int      @default(1000000)
+  tokensUsed    Int      @default(0)
+  billingEmail  String?
+  ssoProvider   String?
+  ssoConfig     Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members        OrgMember[]
+  documents      Document[]
+  docFolders     DocFolder[]
+  accessPolicies AccessPolicy[]
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+  chatSessions   ChatSession[]
+  ingestionJobs  IngestionJob[]
+
+  @@index([slug])
+  @@index([domain])
+}
+
+model OrgMember {
+  id            String   @id @default(cuid())
+  orgId         String
+  clerkUserId   String
+  role          String   @default("member")
+  displayName   String?
+  email         String?
+  department    String?
+  title         String?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  memories      MemoryNode[]
+  chatSessions  ChatSession[]
+
+  @@unique([orgId, clerkUserId])
+  @@index([clerkUserId])
+}
+
+// ═══ DOCUMENT MANAGEMENT ═══
+
+model DocFolder {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  parentId      String?
+  accessLevel   String   @default("all")
+  accessRoles   String[]
+  accessDepts   String[]
+  createdAt     DateTime @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent        DocFolder?   @relation("FolderNesting", fields: [parentId], references: [id])
+  children      DocFolder[]  @relation("FolderNesting")
+  documents     Document[]
+
+  @@index([orgId])
+}
+
+model Document {
+  id            String    @id @default(cuid())
+  orgId         String
+  folderId      String?
+  title         String
+  filename      String
+  mimeType      String
+  fileSize      Int
+  r2Key         String
+  contentHash   String
+  status        String    @default("pending")
+  pageCount     Int?
+  category      String?
+  tags          String[]
+  metadata      Json?
+  lightragDocId String?
+  uploadedBy    String?
+  lastIndexedAt DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  folder        DocFolder?   @relation(fields: [folderId], references: [id])
+  sections      DocumentSection[]
+  citations     Citation[]
+
+  @@unique([orgId, contentHash])
+  @@index([orgId, status])
+  @@index([orgId, category])
+  @@index([folderId])
+}
+
+model DocumentSection {
+  id            String   @id @default(cuid())
+  documentId    String
+  sectionIndex  Int
+  heading       String?
+  content       String   @db.Text
+  pageNumber    Int?
+  lightragDocId String?
+  createdAt     DateTime @default(now())
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  citations     Citation[]
+
+  @@index([documentId])
+}
+
+model AccessPolicy {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  description   String?
+  rules         Json
+  folderIds     String[]
+  createdAt     DateTime @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// ═══ CONVERSATION & MEMORY ═══
+
+model ChatSession {
+  id            String   @id @default(cuid())
+  orgId         String
+  memberId      String
+  title         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  member        OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+  citations     Citation[]
+
+  @@index([orgId, memberId])
+}
+
+model ChatMessage {
+  id            String   @id @default(cuid())
+  sessionId     String
+  role          String
+  content       String   @db.Text
+  spokenText    String?  @db.Text
+  toolCalls     Json?
+  tokenCount    Int?
+  latencyMs     Int?
+  createdAt     DateTime @default(now())
+
+  session       ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  citations     Citation[]
+
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+model Citation {
+  id             String   @id @default(cuid())
+  messageId      String
+  sessionId      String
+  documentId     String
+  sectionId      String?
+  snippet        String   @db.Text
+  pageNumber     Int?
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  message        ChatMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  session        ChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document       Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  section        DocumentSection? @relation(fields: [sectionId], references: [id])
+
+  @@index([messageId])
+  @@index([documentId])
+}
+
+model MemoryNode {
+  id            String   @id @default(cuid())
+  memberId      String
+  category      String
+  key           String
+  content       String   @db.Text
+  confidence    Float    @default(0.8)
+  mentions      Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  member        OrgMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, key])
+  @@index([memberId])
+}
+
+// ═══ INGESTION ═══
+
+model IngestionJob {
+  id            String    @id @default(cuid())
+  orgId         String
+  type          String
+  source        String?
+  status        String    @default("queued")
+  totalFiles    Int       @default(0)
+  processed     Int       @default(0)
+  failed        Int       @default(0)
+  skipped       Int       @default(0)
+  errorLog      Json?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+}
+
+// ═══ AUDIT (IMMUTABLE — append-only) ═══
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  orgId         String
+  clerkUserId   String?
+  action        String
+  detail        Json
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, action])
+  @@index([clerkUserId])
+}
+
+// ═══ API ACCESS ═══
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  orgId         String
+  name          String
+  keyHash       String    @unique
+  keyPrefix     String
+  permissions   String[]
+  rateLimit     Int       @default(100)
+  lastUsedAt    DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([keyHash])
+}

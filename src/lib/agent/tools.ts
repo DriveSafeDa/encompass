@@ -1,0 +1,502 @@
+/**
+ * Encompass Tool Implementations
+ * Each tool returns a JSON string result for the agent loop.
+ * Adapted from Compass tools.ts pattern.
+ */
+
+import Anthropic from "@anthropic-ai/sdk";
+import prisma from "../db";
+import { queryKnowledge } from "../lightrag";
+
+const BRAVE_API_KEY = process.env.BRAVE_API_KEY || "";
+
+interface ToolContext {
+  orgId: string;
+  memberId: string;
+  memberRole: string;
+  memberDept?: string;
+}
+
+// ═══ TOOL: query_knowledge ═══
+
+export async function toolQueryKnowledge(
+  input: { query: string; mode?: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const mode = (input.mode as "hybrid" | "local" | "global") || "hybrid";
+    const result = await queryKnowledge(ctx.orgId, input.query, mode);
+
+    // Enrich with document metadata from DB
+    const enrichedSources = [];
+    for (const source of result.sources || []) {
+      // Parse tenant-prefixed ID: orgId:docId:section-N
+      const parts = source.id.split(":");
+      if (parts.length >= 3) {
+        const docId = parts[1];
+        const doc = await prisma.document.findUnique({
+          where: { id: docId },
+          select: { title: true, category: true, filename: true },
+        });
+        enrichedSources.push({
+          ...source,
+          document_title: doc?.title || "Unknown",
+          document_category: doc?.category || "Unknown",
+          filename: doc?.filename || "",
+        });
+      } else {
+        enrichedSources.push(source);
+      }
+    }
+
+    return JSON.stringify({
+      success: true,
+      response: result.response,
+      sources: enrichedSources.slice(0, 10),
+      source_count: enrichedSources.length,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: search_documents ═══
+
+export async function toolSearchDocuments(
+  input: { search?: string; category?: string; folder?: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const where: Record<string, unknown> = {
+      orgId: ctx.orgId,
+      status: "indexed",
+    };
+    if (input.category) where.category = input.category;
+    if (input.folder) {
+      const folder = await prisma.docFolder.findFirst({
+        where: { orgId: ctx.orgId, name: { contains: input.folder, mode: "insensitive" } },
+      });
+      if (folder) where.folderId = folder.id;
+    }
+
+    let docs;
+    if (input.search) {
+      docs = await prisma.document.findMany({
+        where: {
+          ...where,
+          OR: [
+            { title: { contains: input.search, mode: "insensitive" } },
+            { tags: { hasSome: [input.search.toLowerCase()] } },
+          ],
+        },
+        select: { id: true, title: true, category: true, filename: true, pageCount: true, createdAt: true, tags: true },
+        take: 20,
+        orderBy: { updatedAt: "desc" },
+      });
+    } else {
+      docs = await prisma.document.findMany({
+        where,
+        select: { id: true, title: true, category: true, filename: true, pageCount: true, createdAt: true, tags: true },
+        take: 20,
+        orderBy: { updatedAt: "desc" },
+      });
+    }
+
+    return JSON.stringify({
+      success: true,
+      documents: docs,
+      count: docs.length,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: read_section ═══
+
+export async function toolReadSection(
+  input: { sectionId: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const section = await prisma.documentSection.findUnique({
+      where: { id: input.sectionId },
+      include: {
+        document: {
+          select: { id: true, title: true, orgId: true, category: true },
+        },
+      },
+    });
+
+    if (!section || section.document.orgId !== ctx.orgId) {
+      return JSON.stringify({ success: false, error: "Section not found or access denied" });
+    }
+
+    return JSON.stringify({
+      success: true,
+      content: section.content,
+      heading: section.heading,
+      page_number: section.pageNumber,
+      document_title: section.document.title,
+      document_id: section.document.id,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: cross_reference ═══
+
+export async function toolCrossReference(
+  input: { queries: string[]; objective: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const results = await Promise.all(
+      input.queries.slice(0, 5).map((q) => queryKnowledge(ctx.orgId, q, "hybrid")),
+    );
+
+    const allSources = results.flatMap((r, i) => (r.sources || []).map((s) => ({
+      ...s,
+      query_index: i,
+      query: input.queries[i],
+    })));
+
+    return JSON.stringify({
+      success: true,
+      objective: input.objective,
+      query_results: results.map((r, i) => ({
+        query: input.queries[i],
+        response: r.response,
+        source_count: (r.sources || []).length,
+      })),
+      all_sources: allSources.slice(0, 15),
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: generate_report ═══
+
+export async function toolGenerateReport(
+  input: { report_type: string; title: string; data_queries?: string[]; instructions?: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    // Gather data from knowledge queries
+    const dataResults = [];
+    for (const query of (input.data_queries || [`${input.report_type} data`]).slice(0, 5)) {
+      const result = await queryKnowledge(ctx.orgId, query, "hybrid");
+      dataResults.push({ query, response: result.response });
+    }
+
+    // Build report HTML using Haiku
+    const client = new Anthropic();
+    const reportPrompt = `Generate a professional HTML report.
+
+Title: ${input.title}
+Type: ${input.report_type}
+${input.instructions ? `Instructions: ${input.instructions}` : ""}
+
+Data gathered:
+${dataResults.map((d) => `Query: ${d.query}\nResult: ${d.response}`).join("\n\n")}
+
+Generate a self-contained HTML document with inline styles. Use a professional color scheme (dark navy headers, white background, clean tables). Include:
+- Title and date
+- Executive summary
+- Data tables where appropriate
+- Key metrics highlighted
+- Print-friendly layout
+
+Return ONLY the HTML, no markdown wrapping.`;
+
+    const reportMsg = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      messages: [{ role: "user", content: reportPrompt }],
+    });
+
+    const html = reportMsg.content
+      .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+
+    return JSON.stringify({
+      success: true,
+      html_ready: true,
+      html,
+      summary: `Generated ${input.report_type} report: "${input.title}"`,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: summarize_document ═══
+
+export async function toolSummarizeDocument(
+  input: { document_title: string; focus?: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const doc = await prisma.document.findFirst({
+      where: {
+        orgId: ctx.orgId,
+        title: { contains: input.document_title, mode: "insensitive" },
+        status: "indexed",
+      },
+      include: {
+        sections: {
+          orderBy: { sectionIndex: "asc" },
+          select: { heading: true, content: true, pageNumber: true },
+        },
+      },
+    });
+
+    if (!doc) {
+      return JSON.stringify({ success: false, error: `Document "${input.document_title}" not found` });
+    }
+
+    const fullText = doc.sections
+      .map((s) => `${s.heading ? `## ${s.heading}\n` : ""}${s.content}`)
+      .join("\n\n")
+      .slice(0, 15000);
+
+    const client = new Anthropic();
+
+    const summaryMsg = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1500,
+      messages: [{
+        role: "user",
+        content: `Summarize this document${input.focus ? ` with a focus on: ${input.focus}` : ""}.\n\nDocument: ${doc.title}\n\n${fullText}`,
+      }],
+    });
+
+    const summary = summaryMsg.content
+      .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+
+    return JSON.stringify({
+      success: true,
+      document_title: doc.title,
+      document_id: doc.id,
+      page_count: doc.pageCount,
+      section_count: doc.sections.length,
+      summary,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: search_web ═══
+
+export async function toolSearchWeb(
+  input: { query: string; count?: number },
+): Promise<string> {
+  if (!BRAVE_API_KEY) {
+    return JSON.stringify({ success: false, error: "Web search is not enabled for this organization" });
+  }
+
+  try {
+    const count = Math.min(input.count || 5, 10);
+    const res = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(input.query)}&count=${count}`,
+      {
+        headers: { "X-Subscription-Token": BRAVE_API_KEY, Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    const data = await res.json();
+    const results = (data.web?.results || []).map((r: any) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.description,
+    }));
+    return JSON.stringify({ success: true, results, count: results.length });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: calculate ═══
+
+export async function toolCalculate(
+  input: { expression: string; label?: string },
+): Promise<string> {
+  try {
+    // Safe math eval — only allow numbers and basic operators
+    const sanitized = input.expression.replace(/[^0-9+\-*/().,%\s]/g, "");
+    if (sanitized !== input.expression.replace(/\s/g, "")) {
+      return JSON.stringify({ success: false, error: "Invalid characters in expression" });
+    }
+    const result = Function(`"use strict"; return (${sanitized})`)();
+    return JSON.stringify({
+      success: true,
+      expression: input.expression,
+      result: typeof result === "number" ? Math.round(result * 100) / 100 : result,
+      label: input.label || "",
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: `Calculation failed: ${e.message}` });
+  }
+}
+
+// ═══ TOOL: list_documents ═══
+
+export async function toolListDocuments(
+  input: { category?: string; folder?: string; limit?: number },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const where: Record<string, unknown> = { orgId: ctx.orgId, status: "indexed" };
+    if (input.category) where.category = input.category;
+
+    const docs = await prisma.document.findMany({
+      where,
+      select: { id: true, title: true, category: true, filename: true, pageCount: true, tags: true, createdAt: true },
+      take: input.limit || 20,
+      orderBy: { title: "asc" },
+    });
+
+    return JSON.stringify({
+      success: true,
+      documents: docs,
+      count: docs.length,
+    });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL: check_access ═══
+
+export async function toolCheckAccess(
+  input: { documentId: string },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    const doc = await prisma.document.findUnique({
+      where: { id: input.documentId },
+      include: {
+        folder: {
+          select: { accessLevel: true, accessRoles: true, accessDepts: true },
+        },
+      },
+    });
+
+    if (!doc || doc.orgId !== ctx.orgId) {
+      return JSON.stringify({ success: false, hasAccess: false, reason: "Document not found" });
+    }
+
+    // Check folder-level access
+    if (doc.folder) {
+      const { accessLevel, accessRoles, accessDepts } = doc.folder;
+      if (accessLevel === "all") {
+        return JSON.stringify({ success: true, hasAccess: true });
+      }
+      if (accessLevel === "role" && !accessRoles.includes(ctx.memberRole)) {
+        return JSON.stringify({
+          success: true,
+          hasAccess: false,
+          reason: `This document is restricted to roles: ${accessRoles.join(", ")}`,
+          document_title: doc.title,
+        });
+      }
+      if (accessLevel === "department" && ctx.memberDept && !accessDepts.includes(ctx.memberDept)) {
+        return JSON.stringify({
+          success: true,
+          hasAccess: false,
+          reason: `This document is restricted to departments: ${accessDepts.join(", ")}`,
+          document_title: doc.title,
+        });
+      }
+    }
+
+    return JSON.stringify({ success: true, hasAccess: true, document_title: doc.title });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+// ═══ TOOL EXECUTOR ═══
+
+export interface ActionTaken {
+  tool: string;
+  success: boolean;
+  summary: string;
+}
+
+export interface ToolExecResult {
+  result: string;
+  action: ActionTaken;
+}
+
+export async function executeTool(
+  toolName: string,
+  input: unknown,
+  ctx: ToolContext,
+): Promise<ToolExecResult> {
+  const args = input as Record<string, unknown>;
+  let result: string;
+
+  try {
+    switch (toolName) {
+      case "query_knowledge":
+        result = await toolQueryKnowledge(args as any, ctx);
+        break;
+      case "search_documents":
+        result = await toolSearchDocuments(args as any, ctx);
+        break;
+      case "read_section":
+        result = await toolReadSection(args as any, ctx);
+        break;
+      case "cross_reference":
+        result = await toolCrossReference(args as any, ctx);
+        break;
+      case "generate_report":
+        result = await toolGenerateReport(args as any, ctx);
+        break;
+      case "summarize_document":
+        result = await toolSummarizeDocument(args as any, ctx);
+        break;
+      case "search_web":
+        result = await toolSearchWeb(args as any);
+        break;
+      case "calculate":
+        result = await toolCalculate(args as any);
+        break;
+      case "list_documents":
+        result = await toolListDocuments(args as any, ctx);
+        break;
+      case "check_access":
+        result = await toolCheckAccess(args as any, ctx);
+        break;
+      default:
+        result = JSON.stringify({ success: false, error: `Unknown tool: ${toolName}` });
+    }
+  } catch (e: any) {
+    result = JSON.stringify({ success: false, error: e.message });
+  }
+
+  let success = false;
+  let summary = `Called ${toolName}`;
+  try {
+    const parsed = JSON.parse(result);
+    success = parsed.success !== false;
+    if (toolName === "query_knowledge" && success) summary = `Searched knowledge base: ${(args as any).query}`;
+    else if (toolName === "search_documents" && success) summary = `Found ${parsed.count} documents`;
+    else if (toolName === "generate_report" && success) summary = parsed.summary || "Generated report";
+    else if (toolName === "summarize_document" && success) summary = `Summarized: ${parsed.document_title}`;
+    else if (toolName === "search_web" && success) summary = `Web search: ${parsed.count} results`;
+    else if (toolName === "calculate" && success) summary = `Calculated: ${parsed.result}`;
+    else if (toolName === "list_documents" && success) summary = `Listed ${parsed.count} documents`;
+    else if (toolName === "check_access") summary = parsed.hasAccess ? "Access granted" : `Access denied: ${parsed.reason}`;
+    else if (!success) summary = `${toolName} failed: ${parsed.error}`;
+  } catch { /* keep default summary */ }
+
+  return { result, action: { tool: toolName, success, summary } };
+}
