@@ -16,7 +16,7 @@ import { encompassTools } from "./tool-defs";
 import { executeTool, ActionTaken } from "./tools";
 import { classifyIntent } from "./classifier";
 
-const SONNET = "claude-sonnet-4-6-20250514";
+const SONNET = "claude-sonnet-4-6";
 
 function stripToolLeaks(text: string): string {
   return text
