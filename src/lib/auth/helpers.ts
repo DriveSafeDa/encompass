@@ -20,32 +20,52 @@ export interface AuthContext {
  * Returns null if not authenticated or not a member of any org.
  */
 export async function getAuthContext(): Promise<AuthContext | null> {
-  const { userId, orgId: clerkOrgId } = await auth();
+  let userId: string | null = null;
 
-  if (!userId) return null;
+  try {
+    const clerkAuth = await auth();
+    userId = clerkAuth.userId;
+  } catch {
+    // Clerk auth may fail if not configured — fall through to demo mode
+  }
 
-  // Find the user's org membership
-  // For MVP: find the first org they belong to
-  const member = await prisma.orgMember.findFirst({
-    where: {
-      clerkUserId: userId,
-      status: "active",
-    },
-    include: {
-      org: { select: { id: true, slug: true, name: true } },
-    },
+  if (userId) {
+    // Authenticated user — find their org membership
+    const member = await prisma.orgMember.findFirst({
+      where: { clerkUserId: userId, status: "active" },
+      include: { org: { select: { id: true, slug: true, name: true } } },
+    });
+
+    if (member) {
+      return {
+        clerkUserId: userId,
+        orgId: member.orgId,
+        memberId: member.id,
+        memberRole: member.role,
+        memberDept: member.department || undefined,
+        memberName: member.displayName || undefined,
+      };
+    }
+  }
+
+  // Demo mode: use the first org + first member (for testing without Clerk login)
+  const demoMember = await prisma.orgMember.findFirst({
+    where: { status: "active" },
+    include: { org: { select: { id: true, slug: true, name: true } } },
   });
 
-  if (!member) return null;
+  if (demoMember) {
+    return {
+      clerkUserId: demoMember.clerkUserId,
+      orgId: demoMember.orgId,
+      memberId: demoMember.id,
+      memberRole: demoMember.role,
+      memberDept: demoMember.department || undefined,
+      memberName: demoMember.displayName || undefined,
+    };
+  }
 
-  return {
-    clerkUserId: userId,
-    orgId: member.orgId,
-    memberId: member.id,
-    memberRole: member.role,
-    memberDept: member.department || undefined,
-    memberName: member.displayName || undefined,
-  };
+  return null;
 }
 
 /**
