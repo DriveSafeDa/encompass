@@ -75,7 +75,13 @@ PIPELINE & SCORING:
 CRITICAL QUERY PATTERNS:
 - For "paid referral move-ins": query_structured_data on "Prospects Full Export", filter Stage equals "Move In", then group_by "Lead Source", then identify paid sources from results.
 - For date filtering: use Inquiry Date field with after/before operators (e.g., after "2026-04-01" and before "2026-04-30")
-- Always use "Prospects Full Export" (not "Prospects Export") for move-in questions — the regular export only has open prospects.`;
+- Always use "Prospects Full Export" (not "Prospects Export") for move-in questions — the regular export only has open prospects.
+
+EFFICIENCY RULES:
+- Do NOT use the calculate tool for simple math like multiplication. Just do it in your response text (e.g., "3 move-ins x $4,500 = $13,500").
+- Only use calculate for complex formulas.
+- After getting query_structured_data results with group_by, you have ALL the data you need — compose your answer directly. Do not make additional tool calls.
+- Combine results into ONE clear response with a table or list format.`;
 
   // ═══ PART 3: USER CONTEXT ═══
   let userContext = `# USER CONTEXT

@@ -19,8 +19,8 @@ export interface ClassificationResult {
 const TIER_CONFIGS: Record<string, ClassificationResult> = {
   quick:    { tier: "quick",    maxIterations: 0, skipLoop: true },
   lookup:   { tier: "lookup",   maxIterations: 3, skipLoop: false },
-  research: { tier: "research", maxIterations: 7, skipLoop: false },
-  report:   { tier: "report",   maxIterations: 5, skipLoop: false },
+  research: { tier: "research", maxIterations: 15, skipLoop: false },
+  report:   { tier: "report",   maxIterations: 10, skipLoop: false },
   action:   { tier: "action",   maxIterations: 3, skipLoop: false },
 };
 
