@@ -523,6 +523,15 @@ export async function toolQueryStructuredData(
             case "equals": return val === target;
             case "contains": return val.includes(target);
             case "not_equals": return val !== target;
+            case "after": {
+              // Date comparison: value should be YYYY-MM-DD
+              const rowDate = extractDate(row[fieldName] || "");
+              return rowDate ? rowDate >= target : false;
+            }
+            case "before": {
+              const rowDate = extractDate(row[fieldName] || "");
+              return rowDate ? rowDate <= target : false;
+            }
             default: return true;
           }
         });
@@ -619,6 +628,15 @@ function parseCSVLine(line: string): string[] {
   }
   result.push(current.trim());
   return result;
+}
+
+function extractDate(dateStr: string): string | null {
+  // Handle formats: "2026-04-30", "2026-04-30 09:14:34 PM ET", "04/30/2026"
+  const isoMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const usMatch = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]}`;
+  return null;
 }
 
 function findClosestField(input: string, headers: string[]): string | null {

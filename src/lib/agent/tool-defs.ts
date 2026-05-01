@@ -210,7 +210,7 @@ export const encompassTools: Anthropic.Messages.Tool[] = [
             type: "object",
             properties: {
               field: { type: "string", description: "Column name to filter on (e.g., 'Stage', 'Lead Source', 'Status', 'Score', 'Sales Counselor')" },
-              operator: { type: "string", enum: ["equals", "contains", "not_equals"], description: "Filter operator" },
+              operator: { type: "string", enum: ["equals", "contains", "not_equals", "after", "before"], description: "Filter operator. Use 'after'/'before' for date fields (value format: YYYY-MM-DD)" },
               value: { type: "string", description: "Value to match" },
             },
             required: ["field", "operator", "value"],

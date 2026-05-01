@@ -45,12 +45,33 @@ ${Object.entries(documentStats.categories)
 You can search, cross-reference, and synthesize information from any of these documents. Your knowledge is only as current as the most recently indexed documents.
 
 SENIOR LIVING INDUSTRY KNOWLEDGE:
-- Paid referral sources: A Place for Mom (APFM), Caring.com, SeniorAdvisor.com, Care.com, SeniorHomes.com, AgingCare.com. These charge a referral fee on move-in (typically 50-100% of first month's rent, or $3,000-$8,000 flat fee).
-- Organic/free lead sources: Website, Walk-In, Drive-By, Phone Call, Social Media, Resident Referral, Employee Referral, Community Event, Professional Referral (doctors, social workers, discharge planners).
-- To determine "paid referral sources due money": filter prospects with Stage = "Move-In" and Lead Source matching a paid source. Each move-in from a paid source = one fee owed.
+
+PAID VS FREE LEAD SOURCES:
+- PAID referral sources (fee owed on move-in):
+  * A Place for Mom (APFM): ~100% of first month's rent (typically $3,500-$6,500 per move-in)
+  * Caring.com: ~50-80% of first month's rent (typically $2,000-$4,000)
+  * SeniorAdvisor.com: flat fee ~$1,500-$3,000
+  * Care.com: varies, ~$1,000-$2,500
+  * SeniorHomes.com: ~$1,500-$3,000
+  * AgingCare.com: ~$1,000-$2,000
+  * Any lead source with "referral agency" or "placement" in the name
+- FREE/organic lead sources (no fee): Website, Walk-In, Drive-By, Phone Call, Social Media, Resident Referral, Employee Referral, Community Event, Professional Referral, Direct Mail, Advertising, Google, Facebook
+
+HOW TO CALCULATE REFERRAL FEES OWED:
+1. Use query_structured_data on "Prospects Full Export"
+2. Filter: Stage = "Move-In" (only move-ins trigger fees)
+3. Filter by date if asked about a specific month (use "Initial Contact" or "Inquiry Date" field)
+4. Group by "Lead Source" to see which sources drove move-ins
+5. Cross-reference Lead Source against the paid sources list above
+6. Multiply count x estimated fee per source to calculate total owed
+7. Report: source name, # of move-ins, estimated fee per, total owed
+
+PIPELINE & SCORING:
 - Pipeline stages in order: Inquiry → Connection → Pre-Tour → Post-Tour → Deposit → Move-In
 - Prospect scores: Very Hot, Hot, Warm, Cold
-- Key metrics: Occupancy %, Speed to Lead, Tour-to-Deposit conversion, Inquiry-to-Move-In conversion`;
+- Key metrics: Occupancy %, Speed to Lead, Tour-to-Deposit conversion, Inquiry-to-Move-In conversion
+- "Last month" = filter by Inquiry Date or Initial Contact in the previous calendar month
+- The "Prospects Full Export" has ALL prospect data including closed/moved-in. The "Prospects Export" only has open prospects.`;
 
   // ═══ PART 3: USER CONTEXT ═══
   let userContext = `# USER CONTEXT
