@@ -46,16 +46,13 @@ You can search, cross-reference, and synthesize information from any of these do
 
 SENIOR LIVING INDUSTRY KNOWLEDGE:
 
-PAID VS FREE LEAD SOURCES:
+PAID VS FREE LEAD SOURCES (exact field values in "Prospects Full Export"):
 - PAID referral sources (fee owed on move-in):
-  * A Place for Mom (APFM): ~100% of first month's rent (typically $3,500-$6,500 per move-in)
-  * Caring.com: ~50-80% of first month's rent (typically $2,000-$4,000)
-  * SeniorAdvisor.com: flat fee ~$1,500-$3,000
-  * Care.com: varies, ~$1,000-$2,500
-  * SeniorHomes.com: ~$1,500-$3,000
-  * AgingCare.com: ~$1,000-$2,000
-  * Any lead source with "referral agency" or "placement" in the name
-- FREE/organic lead sources (no fee): Website, Walk-In, Drive-By, Phone Call, Social Media, Resident Referral, Employee Referral, Community Event, Professional Referral, Direct Mail, Advertising, Google, Facebook
+  * "A Place For Mom" (APFM): ~100% of first month's rent (~$4,500 per move-in). 1,464 total leads in system.
+  * "Caring.com": ~50-80% of first month's rent (~$3,000 per move-in). 94 total leads.
+  * "Further-VSA": flat fee ~$2,500 per move-in. 81 total leads.
+  * "Referral Agency": varies ~$2,000-$4,000 per move-in. 140 total leads.
+- FREE/organic lead sources (no fee): "Website", "Professional Referral (Non Paid)", "Google", "Direct Mail", "Word of Mouth", "Competitor", "Monument Sign/Exterior Signage", "Referrals", "The Pointe at Deerfield", "Other campaigns", "Paid social", "Direct traffic", "Magazine", "Unknown"
 
 HOW TO CALCULATE REFERRAL FEES OWED:
 1. Use query_structured_data on "Prospects Full Export"
@@ -67,11 +64,18 @@ HOW TO CALCULATE REFERRAL FEES OWED:
 7. Report: source name, # of move-ins, estimated fee per, total owed
 
 PIPELINE & SCORING:
-- Pipeline stages in order: Inquiry → Connection → Pre-Tour → Post-Tour → Deposit → Move-In
+- Pipeline stages (exact values): "Inquiry", "Connection", "Pre-Tour", "Post-Tour", "Deposit", "Move In" (note: "Move In" has a SPACE, not hyphen)
+- Status values: "open", "closed", "moved_in"
 - Prospect scores: Very Hot, Hot, Warm, Cold
 - Key metrics: Occupancy %, Speed to Lead, Tour-to-Deposit conversion, Inquiry-to-Move-In conversion
-- "Last month" = filter by Inquiry Date or Initial Contact in the previous calendar month
-- The "Prospects Full Export" has ALL prospect data including closed/moved-in. The "Prospects Export" only has open prospects.`;
+- "Last month" = filter by "Inquiry Date" using after/before operators with YYYY-MM-DD format
+- The "Prospects Full Export" has ALL prospect data including closed/moved-in (9,500+ rows). The "Prospects Export" only has open prospects (158 rows).
+- Column 34 is "Stage", Column 39 is "Lead Source", Column 45 is "Inquiry Date"
+
+CRITICAL QUERY PATTERNS:
+- For "paid referral move-ins": query_structured_data on "Prospects Full Export", filter Stage equals "Move In", then group_by "Lead Source", then identify paid sources from results.
+- For date filtering: use Inquiry Date field with after/before operators (e.g., after "2026-04-01" and before "2026-04-30")
+- Always use "Prospects Full Export" (not "Prospects Export") for move-in questions — the regular export only has open prospects.`;
 
   // ═══ PART 3: USER CONTEXT ═══
   let userContext = `# USER CONTEXT
