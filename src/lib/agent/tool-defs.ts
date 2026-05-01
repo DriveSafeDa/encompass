@@ -194,6 +194,52 @@ export const encompassTools: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: "query_structured_data",
+    description:
+      "Query structured data (CSV exports) by filtering rows based on field values. Use this for questions about prospects, referrers, activities, or any tabular data. Supports filtering by any column (e.g., Stage, Lead Source, Status, Score) and aggregation (count, list). This is the PRIMARY tool for answering questions about prospect counts, pipeline stages, lead sources, referral tracking, and move-in data.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        document_title: {
+          type: "string",
+          description: "Title of the CSV/data document to query (e.g., 'Prospects Export', 'Prospects Full Export', 'Referrers Export', 'All Activities', 'Past Due Activities')",
+        },
+        filters: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string", description: "Column name to filter on (e.g., 'Stage', 'Lead Source', 'Status', 'Score', 'Sales Counselor')" },
+              operator: { type: "string", enum: ["equals", "contains", "not_equals"], description: "Filter operator" },
+              value: { type: "string", description: "Value to match" },
+            },
+            required: ["field", "operator", "value"],
+          },
+          description: "Filters to apply to the data rows",
+        },
+        fields_to_return: {
+          type: "array",
+          items: { type: "string" },
+          description: "Which columns to include in results (e.g., ['Prospect First Name', 'Prospect Last Name', 'Lead Source', 'Stage']). If empty, returns count only.",
+        },
+        aggregation: {
+          type: "string",
+          enum: ["count", "list", "group_by"],
+          description: "count = just count matching rows, list = return matching rows, group_by = group and count by a field",
+        },
+        group_by_field: {
+          type: "string",
+          description: "Field to group by when aggregation is 'group_by' (e.g., 'Lead Source', 'Stage', 'Score')",
+        },
+        limit: {
+          type: "number",
+          description: "Max rows to return for 'list' aggregation (default 20)",
+        },
+      },
+      required: ["document_title"],
+    },
+  },
+  {
     name: "check_access",
     description:
       "Check if the current user has access to a specific document. Call this before citing a document if you're unsure about the user's access level.",

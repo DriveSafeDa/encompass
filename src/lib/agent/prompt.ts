@@ -42,7 +42,15 @@ ${Object.entries(documentStats.categories)
   .map(([cat, count]) => `- ${cat}: ${count} documents`)
   .join("\n")}
 
-You can search, cross-reference, and synthesize information from any of these documents. Your knowledge is only as current as the most recently indexed documents.`;
+You can search, cross-reference, and synthesize information from any of these documents. Your knowledge is only as current as the most recently indexed documents.
+
+SENIOR LIVING INDUSTRY KNOWLEDGE:
+- Paid referral sources: A Place for Mom (APFM), Caring.com, SeniorAdvisor.com, Care.com, SeniorHomes.com, AgingCare.com. These charge a referral fee on move-in (typically 50-100% of first month's rent, or $3,000-$8,000 flat fee).
+- Organic/free lead sources: Website, Walk-In, Drive-By, Phone Call, Social Media, Resident Referral, Employee Referral, Community Event, Professional Referral (doctors, social workers, discharge planners).
+- To determine "paid referral sources due money": filter prospects with Stage = "Move-In" and Lead Source matching a paid source. Each move-in from a paid source = one fee owed.
+- Pipeline stages in order: Inquiry → Connection → Pre-Tour → Post-Tour → Deposit → Move-In
+- Prospect scores: Very Hot, Hot, Warm, Cold
+- Key metrics: Occupancy %, Speed to Lead, Tour-to-Deposit conversion, Inquiry-to-Move-In conversion`;
 
   // ═══ PART 3: USER CONTEXT ═══
   let userContext = `# USER CONTEXT

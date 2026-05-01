@@ -449,6 +449,189 @@ export async function toolCheckAccess(
   }
 }
 
+// ═══ TOOL: query_structured_data ═══
+
+export async function toolQueryStructuredData(
+  input: {
+    document_title: string;
+    filters?: Array<{ field: string; operator: string; value: string }>;
+    fields_to_return?: string[];
+    aggregation?: string;
+    group_by_field?: string;
+    limit?: number;
+  },
+  ctx: ToolContext,
+): Promise<string> {
+  try {
+    // Find the document
+    const doc = await prisma.document.findFirst({
+      where: {
+        orgId: ctx.orgId,
+        title: { contains: input.document_title, mode: "insensitive" },
+        status: "indexed",
+      },
+      include: {
+        sections: {
+          orderBy: { sectionIndex: "asc" },
+          select: { content: true, heading: true },
+        },
+      },
+    });
+
+    if (!doc) {
+      return JSON.stringify({ success: false, error: `Document "${input.document_title}" not found` });
+    }
+
+    // Parse CSV content from sections
+    const fullContent = doc.sections.map((s) => s.content).join("\n");
+    const lines = fullContent.split("\n").filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) {
+      return JSON.stringify({ success: false, error: "Document doesn't contain structured tabular data" });
+    }
+
+    // Parse header and rows
+    const headers = parseCSVLine(lines[0]);
+    const rows: Record<string, string>[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseCSVLine(lines[i]);
+      if (values.length >= headers.length * 0.5) { // Allow partial rows
+        const row: Record<string, string> = {};
+        for (let j = 0; j < headers.length; j++) {
+          row[headers[j]] = values[j] || "";
+        }
+        rows.push(row);
+      }
+    }
+
+    if (rows.length === 0) {
+      return JSON.stringify({ success: false, error: "Could not parse any data rows" });
+    }
+
+    // Apply filters
+    let filtered = rows;
+    if (input.filters && input.filters.length > 0) {
+      for (const filter of input.filters) {
+        const fieldName = findClosestField(filter.field, headers);
+        if (!fieldName) continue;
+
+        filtered = filtered.filter((row) => {
+          const val = (row[fieldName] || "").toLowerCase();
+          const target = filter.value.toLowerCase();
+          switch (filter.operator) {
+            case "equals": return val === target;
+            case "contains": return val.includes(target);
+            case "not_equals": return val !== target;
+            default: return true;
+          }
+        });
+      }
+    }
+
+    // Aggregation
+    const aggregation = input.aggregation || "count";
+
+    if (aggregation === "count") {
+      return JSON.stringify({
+        success: true,
+        document_title: doc.title,
+        total_rows: rows.length,
+        matching_rows: filtered.length,
+        available_fields: headers,
+      });
+    }
+
+    if (aggregation === "group_by" && input.group_by_field) {
+      const fieldName = findClosestField(input.group_by_field, headers);
+      if (!fieldName) {
+        return JSON.stringify({ success: false, error: `Field "${input.group_by_field}" not found. Available: ${headers.join(", ")}` });
+      }
+      const groups: Record<string, number> = {};
+      for (const row of filtered) {
+        const val = row[fieldName] || "(empty)";
+        groups[val] = (groups[val] || 0) + 1;
+      }
+      // Sort by count descending
+      const sorted = Object.entries(groups).sort(([, a], [, b]) => b - a);
+      return JSON.stringify({
+        success: true,
+        document_title: doc.title,
+        total_rows: rows.length,
+        matching_rows: filtered.length,
+        group_by: fieldName,
+        groups: Object.fromEntries(sorted),
+        group_count: sorted.length,
+      });
+    }
+
+    if (aggregation === "list") {
+      const limit = input.limit || 20;
+      const fieldsToReturn = input.fields_to_return && input.fields_to_return.length > 0
+        ? input.fields_to_return.map((f) => findClosestField(f, headers) || f)
+        : headers.slice(0, 8); // Default to first 8 columns
+
+      const results = filtered.slice(0, limit).map((row) => {
+        const r: Record<string, string> = {};
+        for (const f of fieldsToReturn) {
+          if (row[f] !== undefined) r[f] = row[f];
+        }
+        return r;
+      });
+
+      return JSON.stringify({
+        success: true,
+        document_title: doc.title,
+        total_rows: rows.length,
+        matching_rows: filtered.length,
+        showing: results.length,
+        results,
+        available_fields: headers,
+      });
+    }
+
+    return JSON.stringify({ success: false, error: `Unknown aggregation: ${aggregation}` });
+  } catch (e: any) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function findClosestField(input: string, headers: string[]): string | null {
+  const lower = input.toLowerCase();
+  // Exact match
+  const exact = headers.find((h) => h.toLowerCase() === lower);
+  if (exact) return exact;
+  // Contains match
+  const contains = headers.find((h) => h.toLowerCase().includes(lower) || lower.includes(h.toLowerCase()));
+  if (contains) return contains;
+  return null;
+}
+
 // ═══ TOOL EXECUTOR ═══
 
 export interface ActionTaken {
@@ -499,6 +682,9 @@ export async function executeTool(
       case "list_documents":
         result = await toolListDocuments(args as any, ctx);
         break;
+      case "query_structured_data":
+        result = await toolQueryStructuredData(args as any, ctx);
+        break;
       case "check_access":
         result = await toolCheckAccess(args as any, ctx);
         break;
@@ -521,6 +707,7 @@ export async function executeTool(
     else if (toolName === "search_web" && success) summary = `Web search: ${parsed.count} results`;
     else if (toolName === "calculate" && success) summary = `Calculated: ${parsed.result}`;
     else if (toolName === "list_documents" && success) summary = `Listed ${parsed.count} documents`;
+    else if (toolName === "query_structured_data" && success) summary = `Queried ${parsed.document_title}: ${parsed.matching_rows} matching rows`;
     else if (toolName === "check_access") summary = parsed.hasAccess ? "Access granted" : `Access denied: ${parsed.reason}`;
     else if (!success) summary = `${toolName} failed: ${parsed.error}`;
   } catch { /* keep default summary */ }
