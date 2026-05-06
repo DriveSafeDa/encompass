@@ -129,6 +129,23 @@ export async function ingestFile(
       },
     });
 
+    // n8n webhook — notify Director that new knowledge is available
+    const N8N_URL = process.env.N8N_WEBHOOK_URL;
+    if (N8N_URL) {
+      fetch(`${N8N_URL}/encompass-doc-ingested`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: doc.id,
+          title,
+          category,
+          sectionsCount: sections.length,
+          orgId,
+        }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {}); // fire-and-forget
+    }
+
     return {
       documentId: doc.id,
       title,
